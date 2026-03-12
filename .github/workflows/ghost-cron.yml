@@ -1,0 +1,42 @@
+name: Ghost Engine - Auto Monetizer
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Se ejecuta cada 6 horas automáticamente
+  workflow_dispatch: # Permite ejecutarlo manualmente para probar
+
+jobs:
+  scan-and-monetize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+
+      - name: Install Subfinder
+        run: go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Python Deps
+        run: pip install -r requirements.txt
+
+      - name: Discover Subdomains
+        # Esto genera el archivo live_subs.txt que tu scanner.py necesita
+        run: $(go env GOPATH)/bin/subfinder -dL targets.txt -o live_subs.txt
+
+      - name: Run Engine & Monetize
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_ID: ${{ secrets.TG_ID }}
+          ADSTERRA_API_KEY: ${{ secrets.ADSTERRA_API_KEY }}
+        run: |
+          python monetization/scanner.py
+          python monetization/landing_gen.py
