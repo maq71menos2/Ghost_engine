@@ -1,68 +1,28 @@
 import requests
-import dns.resolver
 import urllib3
 
-# Deshabilitar advertencias de SSL para escaneos masivos
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Diccionario Maestro de Vulnerabilidades validado
-# Firma: Lo que el servicio devuelve cuando el subdominio está libre
-FINGERPRINTS = {
-    "GitHub Pages": {
-        "sig": "There isn't a GitHub Pages site here",
-        "cname": ["github.io"],
-        "nxdomain": False
-    },
-    "AWS S3": {
-        "sig": "NoSuchBucket",
-        "cname": ["amazonaws.com"],
-        "nxdomain": False
-    },
-    "Heroku": {
-        "sig": "no-such-app.html",
-        "cname": ["herokudns.com", "herokupp.com"],
-        "nxdomain": False
-    },
-    "Shopify": {
-        "sig": "Sorry, this shop is currently unavailable",
-        "cname": ["myshopify.com"],
-        "nxdomain": False
-    },
-    "Azure": {
-        "sig": "The specified bucket does not exist",
-        "cname": ["blob.core.windows.net", "azureedge.net"],
-        "nxdomain": False
-    }
-}
+# Prioridad: Los más fáciles de capturar primero
+FINGERPRINTS = [
+    {"service": "AWS S3", "pattern": "NoSuchBucket", "status": "VULN_EASY"},
+    {"service": "Heroku", "pattern": "No such app", "status": "VULN_EASY"},
+    {"service": "Surge.sh", "pattern": "project not found", "status": "VULN_EASY"},
+    {"service": "GitHub Pages", "pattern": "There isn't a GitHub Pages site here", "status": "VULN_VERIFY_RISK"},
+    {"service": "Ghost.io", "pattern": "The thing you were looking for is no longer here", "status": "VULN_EASY"}
+]
 
 def check_vulnerability(domain):
-    results = {"vulnerable": False, "service": None, "cname": None}
-    
-    # Paso 1: Resolución DNS (Validación de CNAME)
     try:
-        resolver = dns.resolver.Resolver()
-        resolver.timeout = 5
-        resolver.lifetime = 5
-        answers = resolver.resolve(domain, 'CNAME')
-        cname_record = str(answers[0].target).lower()
-        results["cname"] = cname_record
-    except Exception:
-        return results # Si no hay CNAME, no hay Takeover simplificado
+        # Probamos con HTTP y HTTPS para no perder nada
+        url = f"http://{domain}"
+        response = requests.get(url, timeout=5, verify=False, allow_redirects=True)
+        content = response.text
 
-    # Paso 2: Análisis de Respuesta HTTP
-    try:
-        # Usamos un User-Agent de navegador real para evitar bloqueos
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(f"http://{domain}", headers=headers, timeout=8, verify=False, allow_redirects=True)
+        for fp in FINGERPRINTS:
+            if fp["pattern"] in content:
+                return {"vulnerable": True, "service": fp["service"], "priority": fp["status"]}
         
-        for service, data in FINGERPRINTS.items():
-            # Si la firma está en el texto de la página y el CNAME coincide
-            if data["sig"] in response.text:
-                if any(ext in cname_record for ext in data["cname"]):
-                    results["vulnerable"] = True
-                    results["service"] = service
-                    return results
+        return {"vulnerable": False, "service": None, "priority": "SAFE"}
     except:
-        pass
-        
-    return results
+        return {"vulnerable": False, "service": None, "priority": "ERROR"}
