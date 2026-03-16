@@ -13,16 +13,20 @@ permissions:
 jobs:
   surgical-monetization:
     runs-on: ubuntu-latest
+    # Añadimos un timeout global al job por seguridad (máximo 1 hora)
+    timeout-minutes: 60 
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # Importante para evitar errores en el push
+          fetch-depth: 0
 
       - name: Setup Environment
         uses: actions/setup-go@v4
         with:
           go-version: 'stable'
+          cache: true # Activamos caché para que no tarde tanto instalando
       
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -36,26 +40,32 @@ jobs:
 
       - name: Selective Discovery
         run: |
-          # Mezclamos objetivos para variar el escaneo
-          shuf -n 50 targets.txt > active_targets.txt
-          $(go env GOPATH)/bin/subfinder -dL active_targets.txt -t 100 -silent -o live_subs.txt
+          # Aumentamos a 150 objetivos aleatorios para aprovechar la nueva lista
+          shuf -n 150 targets.txt > active_targets.txt
+          
+          # APLICAMOS EL "MAZO": Si en 20 min subfinder no acaba, lo mata y sigue
+          # Esto evita que se quede 20 horas en un solo dominio como Uber
+          timeout 20m $(go env GOPATH)/bin/subfinder -dL active_targets.txt -t 200 -silent -o live_subs.txt || echo "Timeout alcanzado en Subfinder, procesando lo encontrado..."
 
       - name: Run Surgical Engine
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_ID: ${{ secrets.TG_ID }}
           GH_PAT: ${{ secrets.GH_PAT }}
-          # Usamos tu GH_PAT para que el bot pueda crear repositorios
         run: |
-          # Generamos la landing y escaneamos
-          python core/scanner.py
+          # Verificamos si live_subs tiene contenido antes de lanzar Python
+          if [ -s live_subs.txt ]; then
+            python core/scanner.py
+          else
+            echo "No se encontraron subdominios vivos en esta tanda."
+          fi
 
       - name: Save Persistence
         run: |
           git config --local user.email "bot@ghostengine.com"
           git config --local user.name "Ghost Bot"
+          git pull origin main --rebase # Evita conflictos si editaste algo en la Mac
           mkdir -p database
           git add database/inventory.db
-          # El [skip ci] evita que el bot entre en un bucle infinito
           git commit -m "Update DB: Data persistence [skip ci]" || echo "No changes"
           git push origin main
