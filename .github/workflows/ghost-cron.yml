@@ -41,12 +41,26 @@ jobs:
       
       - name: Selective Discovery
         run: |
-          # Subimos a 500 objetivos para aumentar la probabilidad
-          shuf -n 500 targets.txt > active_targets.txt
+          # Mezclamos y agarramos 400 targets
+          shuf -n 400 targets.txt > active_targets.txt
           
-          # Aumentamos los hilos (-t 400) para ir a máxima velocidad
-          timeout 25m $(go env GOPATH)/bin/subfinder -dL active_targets.txt -t 400 -silent -o live_subs.txt || echo "Timeout, procediendo con lo recolectado..."
+          # Bajamos el tiempo a 10m para evitar el error de "Operation Canceled"
+          # Añadimos -all para buscar en más fuentes
+          timeout 10m $(go env GOPATH)/bin/subfinder -dL active_targets.txt -all -t 200 -silent -o live_subs.txt || echo "Fin de búsqueda por tiempo."
 
+      - name: Run Surgical Engine
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_ID: ${{ secrets.TG_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -s live_subs.txt ]; then
+            # Imprimimos cuántos encontramos para que lo veas en el log
+            echo "[*] Procesando $(wc -l < live_subs.txt) subdominios vivos..."
+            python core/scanner.py
+          else
+            echo "No se encontraron subdominios vivos. Revisando targets..."
+          fi
       - name: Run Surgical Engine
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
