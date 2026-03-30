@@ -67,11 +67,12 @@ jobs:
           TG_ID: ${{ secrets.TG_ID }}
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          # Verificamos si live_subs tiene contenido antes de lanzar Python
           if [ -s live_subs.txt ]; then
-            python core/scanner.py
+            echo "[*] Iniciando escaneo intensivo (Límite: 30 min)..."
+            # Si el script tarda más de 30m, se corta y seguimos al siguiente paso
+            timeout 30m python core/scanner.py || echo "Tiempo agotado, guardando lo encontrado..."
           else
-            echo "No se encontraron subdominios vivos en esta tanda."
+            echo "Sin subdominios para procesar."
           fi
 
       - name: Save Persistence
